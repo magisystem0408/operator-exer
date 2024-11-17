@@ -52,6 +52,14 @@ func (r *PasswordReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// TODO(user): your logic here
 	logger.Info("✅ Reconciling Called")
 
+	var password secretv1alpha1.Password
+	if err := r.Get(ctx, req.NamespacedName, &password); err != nil {
+		logger.Error(err, "❌ Unable to fetch Password")
+
+		//NOTE: 1回の中で呼ばれる。
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
 	return ctrl.Result{}, nil
 }
 
