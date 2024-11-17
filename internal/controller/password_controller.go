@@ -18,7 +18,10 @@ package controller
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,6 +39,7 @@ type PasswordReconciler struct {
 //+kubebuilder:rbac:groups=secret.example.com,resources=passwords,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=secret.example.com,resources=passwords/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=secret.example.com,resources=passwords/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -55,11 +59,33 @@ func (r *PasswordReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	var password secretv1alpha1.Password
 	if err := r.Get(ctx, req.NamespacedName, &password); err != nil {
 		logger.Error(err, "❌ Unable to fetch Password")
-
 		//NOTE: 1回の中で呼ばれる。
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	var secret corev1.Secret
+	if err := r.Get(ctx, req.NamespacedName, &secret); err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("👩 Create Secret Object if not exist, create secret")
+			secret := newSecretFromPassword(&password)
+
+			//NOTE: add secret and password reference
+			err := ctrl.SetControllerReference(&password, secret, r.Scheme)
+			if err != nil {
+				logger.Error(err, "😺 Unable to set controller reference")
+				return ctrl.Result{}, err
+			}
+
+			err = r.Create(ctx, secret)
+			if err != nil {
+				logger.Error(err, "❌ Unable to create Secret")
+				return ctrl.Result{}, err
+			} else {
+				logger.Error(err, "Create Secret Object")
+				return ctrl.Result{}, err
+			}
+		}
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -68,4 +94,17 @@ func (r *PasswordReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&secretv1alpha1.Password{}).
 		Complete(r)
+}
+
+func newSecretFromPassword(password *secretv1alpha1.Password) *corev1.Secret {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      password.Name,
+			Namespace: password.Namespace,
+		},
+		Data: map[string][]byte{
+			"password": []byte("123456"),
+		},
+	}
+	return secret
 }
